@@ -867,6 +867,7 @@
   <script src="https://unpkg.com/mqtt@5.7.1/dist/mqtt.min.js"></script>
   <script>
     const ConvoySystem = {
+      baseURL: window.location.hostname === 'localhost' ? 'http://localhost:8000' : `${window.location.protocol}//${window.location.host}`,
       map: null,
       routeControl: null,
       vehicleMarkers: {},
@@ -1102,13 +1103,13 @@
             if (!payload.ammoType || payload.ammoQuantity <= 0) throw new Error('Invalid ammunition details');
           }
 
-          const response = await fetch('http://localhost:8000/assign-vehicles/', {
+          const response = await fetch(`${this.baseURL}/assign-vehicles/`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
           });
 
-          if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
+          if (!response.ok) throw new Error(`HTTP error: ${response.status} ${response.statusText}`);
           const result = await response.json();
 
           this.activeRequests.push({
@@ -1122,8 +1123,8 @@
           this.drawRoute(startCoords, endCoords, vehicleSpeed, result);
           this.map.invalidateSize();
         } catch (error) {
+          console.error('Submit load request error:', error.message, error.stack);
           alert('Error: ' + error.message);
-          console.error('Submit load request error:', error);
         } finally {
           button.disabled = false;
           button.classList.remove('loading');
@@ -1590,8 +1591,8 @@ const policeRear = L.marker(positions[positions.length - 1], {
 
       async refreshVehicles() {
         try {
-          const response = await fetch('http://localhost:8000/mqtt-status/');
-          if (!response.ok) throw new Error('Failed to fetch vehicle data');
+          const response = await fetch(`${this.baseURL}/mqtt-status/`);
+          if (!response.ok) throw new Error(`Failed to fetch vehicle data: ${response.status} ${response.statusText}`);
           const data = await response.json();
 
           this.mqttConnected = data.connected;
@@ -1602,7 +1603,7 @@ const policeRear = L.marker(positions[positions.length - 1], {
           document.getElementById('activeVehicleCount').textContent = data.active_vehicles;
           document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
         } catch (error) {
-          console.error('Refresh vehicles error:', error);
+          console.error('Refresh vehicles error:', error.message, error.stack);
         }
       },
 
@@ -1640,6 +1641,7 @@ const policeRear = L.marker(positions[positions.length - 1], {
         }
       },
 
+      
       updateVehicleMarkers(vehicles) {
         try {
           for (const [vehicleId, vehicleData] of Object.entries(vehicles)) {
