@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles  # Added for static files
-from fastapi.responses import FileResponse  # Added for serving index.html
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import asyncio
@@ -10,18 +10,46 @@ from datetime import datetime, timedelta
 import math
 import paho.mqtt.client as mqtt
 import threading
-import os  # Added for path handling
+import os
 import uvicorn
 
 app = FastAPI()
 
-# Mount static files directory
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# Serve index.html at root
-@app.get("/")
-async def serve_index():
-    return FileResponse("static/index.html")
+# Check if static directory exists, if not create it or handle gracefully
+static_dir = "static"
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    
+    # Serve index.html at root only if static directory exists
+    @app.get("/")
+    async def serve_index():
+        index_path = os.path.join(static_dir, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        else:
+            return JSONResponse(
+                content={"message": "Military Logistics API", "status": "running"},
+                status_code=200
+            )
+else:
+    # If no static directory, serve a simple API info page
+    @app.get("/")
+    async def api_info():
+        return JSONResponse(
+            content={
+                "message": "Military Logistics Management API", 
+                "status": "running",
+                "version": "1.0",
+                "endpoints": [
+                    "/docs - API Documentation",
+                    "/connect-mqtt/ - Connect to MQTT broker",
+                    "/assign-vehicles/ - Assign vehicles to loads",
+                    "/available-vehicles/ - Get available vehicles",
+                    "/optimize-convoy/ - Optimize convoy allocation"
+                ]
+            },
+            status_code=200
+        )
 
 # Enable CORS
 app.add_middleware(
@@ -228,6 +256,8 @@ def optimize_vehicle_allocation(requests: List[LoadRequest], available_vehicles:
     return allocations
 
 def calculate_troop_vehicles(soldier_count: int, gear_load: str) -> int:
+    if not soldier_count:
+        return 1
     gear_factors = {"light": 1.0, "medium": 1.5, "heavy": 2.0}
     factor = gear_factors.get(gear_load, 1.0)
     troops_per_vehicle = BUS_CAPACITY / factor
@@ -246,12 +276,25 @@ def calculate_cargo_vehicles(request: LoadRequest) -> int:
     
     return max(trucks_by_volume, trucks_by_weight)
 
+# Health check endpoint for monitoring
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "mqtt_connected": mqtt_connected,
+        "active_vehicles": len(active_vehicles)
+    }
+
 # API Endpoints
 @app.post("/connect-mqtt/")
 async def connect_mqtt(config: MQTTConfig):
     global mqtt_client, mqtt_connected
     
     try:
+        if mqtt_client:
+            mqtt_client.disconnect()
+            
         mqtt_client = mqtt.Client()
         mqtt_client.on_connect = on_connect
         mqtt_client.on_message = on_message
@@ -315,11 +358,15 @@ async def assign_vehicles(data: LoadRequest):
             response["vehiclesRequired"] = vehicles_required
             response["recommendedVehicleType"] = "armored_truck"
             response["specialHandling"] = "Explosive material - special escort required"
+        else:
+            response["vehiclesRequired"] = 1
+            response["recommendedVehicleType"] = "truck"
         
         # Add route recommendations if coordinates provided
         if data.startCoords and data.endCoords:
             distance = calculate_distance(data.startCoords, data.endCoords)
             travel_time = distance / (data.vehicleSpeed or 40)
+            vehicles_required = response.get("vehiclesRequired", 1)
             
             response["routeAnalysis"] = {
                 "distance_km": round(distance, 2),
@@ -423,7 +470,7 @@ async def generate_movement_instructions(convoy: ConvoyRequest):
         "load_type": convoy.loadType,
         "vehicle_count": len(convoy.vehicles),
         "route_distance": sum([calculate_distance(convoy.route[i], convoy.route[i+1]) 
-                              for i in range(len(convoy.route)-1)]),
+                              for i in range(len(convoy.route)-1)]) if len(convoy.route) > 1 else 0,
         "estimated_duration": convoy.estimatedDuration,
         "special_instructions": [],
         "checkpoint_instructions": [],
@@ -449,9 +496,7 @@ async def generate_movement_instructions(convoy: ConvoyRequest):
         ])
     return instructions
 
-# uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-
+# Main execution
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
-    # uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
