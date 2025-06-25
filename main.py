@@ -16,28 +16,28 @@ import uvicorn
 app = FastAPI()
 
 # Check if static directory exists, if not create it or handle gracefully
+# Check if static directory exists, if not create it or handle gracefully
 static_dir = "static"
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
-    
-    # Serve index.html at root only if static directory exists
-    @app.get("/")
+
+    # Serve index.html at root (GET + HEAD)
+    @app.api_route("/", methods=["GET", "HEAD"])
     async def serve_index():
         index_path = os.path.join(static_dir, "index.html")
         if os.path.exists(index_path):
             return FileResponse(index_path)
-        else:
-            return JSONResponse(
-                content={"message": "Military Logistics API", "status": "running"},
-                status_code=200
-            )
+        return JSONResponse(
+            content={"message": "Military Logistics API", "status": "running"},
+            status_code=200
+        )
 else:
-    # If no static directory, serve a simple API info page
-    @app.get("/")
+    # Simple API info page (GET + HEAD)
+    @app.api_route("/", methods=["GET", "HEAD"])
     async def api_info():
         return JSONResponse(
             content={
-                "message": "Military Logistics Management API", 
+                "message": "Military Logistics Management API",
                 "status": "running",
                 "version": "1.0",
                 "endpoints": [
@@ -500,3 +500,4 @@ async def generate_movement_instructions(convoy: ConvoyRequest):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
+    
